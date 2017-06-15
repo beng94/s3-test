@@ -18,15 +18,18 @@ const init = () => {
 
 const signFile = (file) => {
     console.log(`Signing file: ${file}`);
-    const url = s3.getSignedUrl('putObject', {
+    const putUrl = s3.getSignedUrl('putObject', {
         Bucket: config.aws.bucket,
         Key: file,
         Expires: config.aws.expire,
         ACL: 'public-read'
     });
 
-    console.log(`Signed url: ${url}`);
-    return url;
+    const payload = {
+        upload: putUrl,
+        download: putUrl.split('?')[0]
+    };
+    return payload;
 };
 
 const sendFile = (filePath, url) => {
@@ -36,9 +39,6 @@ const sendFile = (filePath, url) => {
     request.put({ url: url, formData: formData }, (err, response, body) => {
         if(err) {
             console.log(`Error: ${err}`);
-        } else {
-            const host = url.split('?')[0];
-            console.log(host);
         }
     });
 };
@@ -47,5 +47,7 @@ const sendFile = (filePath, url) => {
 init();
 
 const file = 'monkey.txt';
-const url = signFile(file);
-sendFile(file, url);
+const payload = signFile(file);
+console.log(`Upload: ${payload.upload}`);
+console.log(`Download: ${payload.download}`);
+sendFile(file, payload.upload);
