@@ -1,6 +1,8 @@
 const aws = require('aws-sdk');
 const fs = require('fs');
 const request = require('request');
+const fetch = require('node-fetch');
+const FormData = require('form-data');
 const config = require('./config');
 
 let s3;
@@ -13,41 +15,61 @@ const init = () => {
         secretAccessKey: config.aws.keySecret
     });
 
-    s3 = new aws.S3();
+    s3 = new aws.S3({signatureVersion: 'v4'});
 };
 
-const signFile = (file) => {
-    console.log(`Signing file: ${file}`);
-    const putUrl = s3.getSignedUrl('putObject', {
-        Bucket: config.aws.bucket,
-        Key: file,
-        Expires: config.aws.expire,
-        ACL: 'public-read'
+const signFile = (filePath) => {
+    return new Promise((resolve, reject) => {
+        const params = {
+            Bucket: config.aws.bucket,
+            Fields: {
+                key: filePath
+            },
+            Expires: config.aws.expire,
+            Conditions: [
+                ['content-length-range', 0, 10000000], // 10 Mb
+                {'acl': 'public-read'}
+            ]
+        };
+        s3.createPresignedPost(params, (err, data) => {
+            resolve(data);
+        });
     });
-
-    const payload = {
-        upload: putUrl,
-        download: putUrl.split('?')[0]
-    };
-    return payload;
 };
 
-const sendFile = (filePath, url) => {
-    const formData = {
-        my_file: fs.createReadStream(__dirname + `/${filePath}`)
-    };
-    request.put({ url: url, formData: formData }, (err, response, body) => {
-        if(err) {
-            console.log(`Error: ${err}`);
-        }
+const sendFile = (filePath, payload) => {
+    const form = new FormData();
+    form.append('acl', 'public-read');
+    for(const field in payload.fields) {
+        form.append(field, payload.fields[field]);
+    }
+    form.append('file', fs.createReadStream(__dirname + `/${filePath}`));
+    form.getLength((err, length) => {
+        fetch(payload.url, {
+            method: 'POST',
+            body: form,
+            headers: {
+                'Content-Type': false,
+                'Content-Length': length
+            }
+        })
+        .then((response) => {
+            console.log(response.status);
+            return response.text(); })
+        .then((payload) => { console.log(payload); })
+        .catch((err) => console.log(`Error: ${err}`));
     });
 };
 
 
 init();
 
-const file = 'monkey.txt';
-const payload = signFile(file);
-console.log(`Upload: ${payload.upload}`);
-console.log(`Download: ${payload.download}`);
-sendFile(file, payload.upload);
+const file = 'test.pdf';
+const filePath = `files/new/${file}`;
+signFile(filePath)
+.then((payload) => {
+    console.log(`Upload: ${payload.upload}`);
+    console.log(`Download: ${payload.download}`);
+    sendFile(file, payload);
+});
+
